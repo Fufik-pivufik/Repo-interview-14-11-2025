@@ -15,7 +15,10 @@ import (
 // создаем общий путь для файла с сохранением.
 // Можно конечно получить имя файла как параметр в функции,
 // но у нас нет цели как-то  экспортировать и использовать этот файл иначе чем save/load
-const jsonfile string = "./storage/state.json"
+const (
+	jsonfile     string = "./storage/state.json"
+	workersCount int    = 5
+)
 
 // В этом файле будет описана работа структуры для хранения
 // всех доступных пачек ссылок
@@ -26,22 +29,110 @@ type Repository struct {
 	mtx     sync.RWMutex
 	Batches map[int]*Batch
 	NextID  int
+
+	tchan    chan *Task
+	WGroup   sync.WaitGroup
+	shutdown chan struct{}
+}
+
+type Task struct {
+	BatchID   int
+	LinkIndex int
+	URL       string
 }
 
 func NewRepos() *Repository {
-	return &Repository{
-		Batches: make(map[int]*Batch),
-		NextID:  1,
+	rep := &Repository{
+		Batches:  make(map[int]*Batch),
+		NextID:   1,
+		tchan:    make(chan *Task, 100),
+		shutdown: make(chan struct{}),
+	}
+
+	rep.StartWorkers()
+	return rep
+}
+
+func (rep *Repository) StartWorkers() {
+	for i := 0; i < workersCount; i++ {
+		rep.WGroup.Add(1)
+		go rep.worker()
 	}
 }
 
-func (rep *Repository) CreateBatch(urls []string) {
+func (rep *Repository) worker() {
+	defer rep.WGroup.Done()
+	for {
+		select {
+		case task := <-rep.tchan:
+			rep.procTask(task)
+		case <-rep.shutdown:
+			fmt.Println("Working shutting down...")
+			return
+		}
+	}
+}
+
+func (rep *Repository) Shutdown() {
+	fmt.Println("Shutting down repository...")
+
+	close(rep.shutdown)
+
+	done := make(chan struct{})
+	go func() {
+		rep.WGroup.Wait()
+		close(done)
+	}()
+
+	select {
+	case <-done:
+		fmt.Println("All workers completed their tasks")
+	case <-time.After(10 * time.Second):
+		fmt.Println("Timeout waiting for workers to complete")
+	}
+
+	rep.drainTaskChannel()
+
+	if err := rep.SaveState(); err != nil {
+		fmt.Printf("Error saving final state: %v\n", err)
+	} else {
+		fmt.Println("Final state saved successfully")
+	}
+}
+
+func (rep *Repository) drainTaskChannel() {
+	close(rep.tchan)
+
+	for task := range rep.tchan {
+		rep.procTask(task)
+		fmt.Printf("Processed remaining task for batch %d\n", task.BatchID)
+	}
+}
+
+func (rep *Repository) procTask(task *Task) {
+	tmplink := CreateLink(task.URL)
+	tmplink.CheckLink()
+
+	rep.updateLinkStat(task.BatchID, task.LinkIndex, tmplink.State, tmplink.Checked)
+}
+
+func (rep *Repository) updateLinkStat(batchID int, linkIndex int, state string, checked time.Time) {
+	rep.mtx.Lock()
+	defer rep.mtx.Unlock()
+
+	if batch, exists := rep.Batches[batchID]; exists && linkIndex < len(batch.Links) {
+		batch.Links[linkIndex].State = state
+		batch.Links[linkIndex].Checked = checked
+	}
+}
+
+func (rep *Repository) CreateBatch(urls []string) int {
 	rep.mtx.Lock()
 	defer rep.mtx.Unlock()
 
 	if _, idExists := rep.Batches[rep.NextID]; idExists {
 		fmt.Println("Error: cannot set banch for id: ", rep.NextID)
-		return
+		return 0
 	}
 	var links []Link
 	for _, url := range urls {
@@ -55,6 +146,7 @@ func (rep *Repository) CreateBatch(urls []string) {
 		time.Now(),
 	}
 	rep.NextID++
+	return rep.NextID - 1
 }
 
 func (rep *Repository) GetBanchByID(id int) (*Batch, error) {
@@ -78,22 +170,51 @@ func (rep *Repository) DeleteBanchByID(id int) error {
 }
 
 func (rep *Repository) CheckBanchByID(id int) error {
+
+	select {
+	case <-rep.shutdown:
+		return errors.New("service is shutting down")
+
+	default:
+	}
+
 	batch, err := rep.GetBanchByID(id)
 	if err != nil {
 		return err
 	}
 
-	var wg sync.WaitGroup
-	wg.Add(len(batch.Links))
-	for i := 0; i < len(batch.Links); i++ {
-		go func(index int) {
-			defer wg.Done()
-			batch.Links[index].CheckLink()
-		}(i)
+	for i, link := range batch.Links {
+		task := &Task{
+			BatchID:   id,
+			LinkIndex: i,
+			URL:       link.URL,
+		}
+
+		select {
+		case rep.tchan <- task:
+
+		case <-rep.shutdown:
+			return errors.New("service is shutting down")
+		}
+	}
+	return nil
+}
+
+func (rep *Repository) IsBatchCompleted(batchID int) bool {
+	rep.mtx.RLock()
+	defer rep.mtx.RUnlock()
+
+	batch, exists := rep.Batches[batchID]
+	if !exists {
+		return false
 	}
 
-	wg.Wait()
-	return nil
+	for _, link := range batch.Links {
+		if link.State == "unknown" {
+			return false
+		}
+	}
+	return true
 }
 
 // Для корректной перезагрузки я буду использовать сохранение текущих данных в json файл
@@ -197,3 +318,6 @@ func (rep *Repository) GenerateReport(batchIDs []int) ([]byte, error) {
 	return pdfBytes.Bytes(), nil
 
 }
+
+//
+// Функция завершения работы

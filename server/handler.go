@@ -3,6 +3,7 @@ package main
 import (
 	"encoding/json"
 	"fmt"
+	"github.com/go-chi/chi/v5"
 	"net/http"
 	"strconv"
 	"time"
@@ -44,8 +45,7 @@ func (s *Server) checkLinksHandler(wt http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	batchID := s.rep.NextID
-	s.rep.CreateBatch(req.URLs)
+	batchID := s.rep.CreateBatch(req.URLs)
 	if err := s.rep.CheckBanchByID(batchID); err != nil {
 		http.Error(wt, err.Error(), http.StatusBadRequest)
 		return
@@ -60,7 +60,7 @@ func (s *Server) checkLinksHandler(wt http.ResponseWriter, r *http.Request) {
 	wt.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(wt).Encode(CheckLinksResponse{
 		BatchID: batchID,
-		Status:  "checked",
+		Status:  "in process",
 		Links:   batch.Links,
 	})
 }
@@ -90,4 +90,32 @@ func (s *Server) reportHandler(wt http.ResponseWriter, r *http.Request) {
 	wt.Header().Set("Content-Length", strconv.Itoa(len(pdfData)))
 
 	wt.Write(pdfData)
+}
+
+// Новый хендлер для проверки статуса пачки
+func (s *Server) batchStatusHandler(wt http.ResponseWriter, r *http.Request) {
+	batchIDStr := chi.URLParam(r, "batchID")
+	batchID, err := strconv.Atoi(batchIDStr)
+	if err != nil {
+		http.Error(wt, "Invalid batch ID", http.StatusBadRequest)
+		return
+	}
+
+	batch, err := s.rep.GetBanchByID(batchID)
+	if err != nil {
+		http.Error(wt, err.Error(), http.StatusNotFound)
+		return
+	}
+
+	status := "completed"
+	if !s.rep.IsBatchCompleted(batchID) {
+		status = "processing"
+	}
+
+	wt.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(wt).Encode(CheckLinksResponse{
+		BatchID: batchID,
+		Status:  status,
+		Links:   batch.Links,
+	})
 }

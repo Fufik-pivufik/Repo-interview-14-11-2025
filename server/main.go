@@ -2,9 +2,15 @@ package main
 
 import (
 	"fmt"
+	"os"
 )
 
 func main() {
+
+	if err := os.MkdirAll("./storage", 0755); err != nil {
+		fmt.Println("Error create dir storage")
+	}
+
 	rep := NewRepos()
 
 	err := rep.LoadState()
