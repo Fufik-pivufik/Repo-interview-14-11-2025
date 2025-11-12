@@ -66,6 +66,15 @@ func (rep *Repository) GetBanchByID(id int) (*Batch, error) {
 	return &Batch{}, errors.New("This id is not available")
 }
 
+func (rep *Repository) DeleteBanchByID(id int) error {
+	if _, exists := rep.Batches[id]; exists {
+		delete(rep.Batches, id)
+		return nil
+	}
+
+	return errors.New("Cannot delete: element with this id does not exist")
+}
+
 func (rep *Repository) CheckBanchByID(id int) error {
 	batch, err := rep.GetBanchByID(id)
 	if err != nil {
