@@ -1,13 +1,15 @@
 package main
 
 import (
+	"bytes"
 	"encoding/json"
 	"errors"
 	"fmt"
-	"github.com/jung-kurt/gofpdf"
 	"os"
 	"sync"
 	"time"
+
+	"github.com/jung-kurt/gofpdf"
 )
 
 // создаем общий путь для файла с сохранением.
@@ -132,7 +134,7 @@ func (rep *Repository) LoadState() error {
 
 // Работаем с pdf с помощью gofpdf
 
-func (rep *Repository) GenerateReport(batchIDs []int) error {
+func (rep *Repository) GenerateReport(batchIDs []int) ([]byte, error) {
 	rep.mtx.RLock()
 	defer rep.mtx.RUnlock()
 
@@ -186,12 +188,12 @@ func (rep *Repository) GenerateReport(batchIDs []int) error {
 
 		pdf.Ln(10)
 	}
-
-	pdfname := "./reports/report_" + time.Now().Format("DD_MM_YYYY__HH_MM_SS") + ".pdf"
-
-	err := pdf.OutputFileAndClose(pdfname)
-	if err != nil {
-		return err
+	var pdfBytes bytes.Buffer
+	buffer := pdf.Output(&pdfBytes)
+	if buffer != nil {
+		return nil, fmt.Errorf("error generating PDF: %v", buffer)
 	}
-	return nil
+
+	return pdfBytes.Bytes(), nil
+
 }

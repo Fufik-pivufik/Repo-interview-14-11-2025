@@ -1,0 +1,26 @@
+{
+ "Batches": {
+  "1": {
+   "id": 1,
+   "links": [
+    {
+     "url": "https://google.com",
+     "state": "available",
+     "checked at": "2025-11-12T12:31:14.999778239+03:00"
+    },
+    {
+     "url": "https://ya.ru",
+     "state": "available",
+     "checked at": "2025-11-12T12:31:14.426880462+03:00"
+    },
+    {
+     "url": "https://invalid.url",
+     "state": "unavailable",
+     "checked at": "2025-11-12T12:31:14.128191925+03:00"
+    }
+   ],
+   "created at": "2025-11-12T12:31:14.128196046+03:00"
+  }
+ },
+ "NextID": 2
+}

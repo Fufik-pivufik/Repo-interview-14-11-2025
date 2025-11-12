@@ -5,11 +5,22 @@ import (
 )
 
 func main() {
-	repo := NewRepos()
-	repo.CreateBatch([]string{"https://google.com", "https://ya.ru", "https://invalid.url"})
-	fmt.Printf("repo's next batch id: %d\n", repo.NextID)
-	fmt.Println(repo.batches[1])
+	rep := NewRepos()
 
-	repo.CheckBanchByID(1)
-	fmt.Println(repo.batches[1])
+	err := rep.LoadState()
+	if err != nil {
+		fmt.Println("Cannot rload previous state, starting as first run")
+	}
+	defer func() {
+		err = rep.SaveState()
+		if err != nil {
+			fmt.Println("failed to write json file: ", err)
+		}
+	}()
+
+	server := NewServer(rep)
+	fmt.Println("Server litening at 8080...")
+	if err := server.Start("8080"); err != nil {
+		fmt.Println("Server error: ", err)
+	}
 }
